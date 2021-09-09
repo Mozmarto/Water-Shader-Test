@@ -72,6 +72,7 @@ Material:
     - _AlphaCutoff: 0.5
     - _Blend: 0
     - _BumpScale: 1
+    - _Contrastidk: 1.49
     - _Cull: 2
     - _Cutoff: 0.5
     - _DstBlend: 0
@@ -81,15 +82,22 @@ Material:
     - _GlossyReflections: 0
     - _MaxDepthMapValue: 0.4
     - _Metallic: 0
+    - _Midpoint: -0.67
     - _NormalMapColorVariationScale: 0.16
-    - _NormalMapDeformStrength: 0.11
+    - _NormalMapDeformStrength: 0.41
     - _NormalMapScale: 0.4
-    - _NormalMapStrength: 0.62
-    - _NormalMapStrengthVariationBias: 0.292
-    - _NormalMapStrengthVariationScale: 0.1
+    - _NormalMapStrength: 0.8
+    - _NormalMapStrengthVariationBias: 0.286
+    - _NormalMapStrengthVariationScale: 0.245
+    - _NormalRotationNoiseContrast: 1.99
+    - _NormalRotationNoiseMidpoint: -0.14
+    - _NormalRotationNoiseScale: 0.21
+    - _Normalmaprotation: 3.18
     - _OcclusionStrength: 1
     - _QueueOffset: 0
     - _ReceiveShadows: 1
+    - _RotationStrength: 1
+    - _SecondNormalMapRotation: 0.17
     - _Smoothness: 1.14
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -118,7 +126,7 @@ Material:
     - _TerrainPosition: {r: 0, g: 0, b: 0, a: 0}
     - _TerrainPositionInUnits: {r: 0, g: 0, b: 0, a: 0}
     - _TerrainSizeInUnits: {r: 40, g: 40, b: 0, a: 0}
-    - _WaterColorDeep: {r: 0.20871404, g: 0.48262027, b: 0.5754717, a: 1}
+    - _WaterColorDeep: {r: 0.16088168, g: 0.39936605, b: 0.4811321, a: 1}
     - _WaterColorShallow: {r: 0.19022189, g: 0.76883596, b: 0.7924528, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &7465072212798676212

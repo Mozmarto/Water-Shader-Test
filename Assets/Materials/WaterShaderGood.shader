@@ -22,7 +22,10 @@ Shader "WaterShaderGood"
 		_NormalMapScale("Normal Map Scale", Float) = 1
 		_NormalMapDeformStrength("Normal Map Deform Strength", Float) = 1
 		_NormalMapStrengthVariationScale("Normal Map Strength Variation Scale", Range( 0 , 1)) = 0.5
-		[ASEEnd]_NormalMapStrengthVariationBias("Normal Map Strength Variation Bias", Range( 0 , 1)) = 0.4771704
+		_NormalMapStrengthVariationBias("Normal Map Strength Variation Bias", Range( 0 , 1)) = 0.4771704
+		_NormalRotationNoiseContrast("Normal Rotation Noise Contrast", Float) = 1.49
+		_NormalRotationNoiseScale("Normal Rotation Noise Scale", Float) = 0
+		[ASEEnd]_NormalRotationNoiseMidpoint("Normal Rotation Noise Midpoint", Float) = -0.67
 
 		//_TransmissionShadow( "Transmission Shadow", Range( 0, 1 ) ) = 0.5
 		//_TransStrength( "Trans Strength", Range( 0, 50 ) ) = 1
@@ -248,18 +251,21 @@ Shader "WaterShaderGood"
 			};
 
 			CBUFFER_START(UnityPerMaterial)
-			float4 _WaterColorDeep;
 			float4 _WaterColorShallow;
-			float2 _TerrainSizeInUnits;
+			float4 _WaterColorDeep;
 			float2 _TerrainPositionInUnits;
-			float _NormalMapScale;
-			float _NormalMapDeformStrength;
-			float _NormalMapStrengthVariationScale;
-			float _NormalMapStrengthVariationBias;
-			float _MaxDepthMapValue;
-			float _WaterDepthMapFalloff;
-			float _WaterDepthMapStrength;
+			float2 _TerrainSizeInUnits;
 			float _NormalMapStrength;
+			float _WaterDepthMapStrength;
+			float _WaterDepthMapFalloff;
+			float _MaxDepthMapValue;
+			float _NormalMapScale;
+			float _NormalMapStrengthVariationBias;
+			float _NormalMapStrengthVariationScale;
+			float _NormalMapDeformStrength;
+			float _NormalRotationNoiseMidpoint;
+			float _NormalRotationNoiseScale;
+			float _NormalRotationNoiseContrast;
 			float _Metallic;
 			float _Smoothness;
 			#ifdef _TRANSMISSION_ASE
@@ -315,6 +321,31 @@ Shader "WaterShaderGood"
 				return 130.0 * dot( m, g );
 			}
 			
+			float4 CalculateContrast( float contrastValue, float4 colorTarget )
+			{
+				float t = 0.5 * ( 1.0 - contrastValue );
+				return mul( float4x4( contrastValue,0,0,t, 0,contrastValue,0,t, 0,0,contrastValue,t, 0,0,0,1 ), colorTarget );
+			}
+			//https://www.shadertoy.com/view/XdXGW8
+			float2 GradientNoiseDir( float2 x )
+			{
+				const float2 k = float2( 0.3183099, 0.3678794 );
+				x = x * k + k.yx;
+				return -1.0 + 2.0 * frac( 16.0 * k * frac( x.x * x.y * ( x.x + x.y ) ) );
+			}
+			
+			float GradientNoise( float2 UV, float Scale )
+			{
+				float2 p = UV * Scale;
+				float2 i = floor( p );
+				float2 f = frac( p );
+				float2 u = f * f * ( 3.0 - 2.0 * f );
+				return lerp( lerp( dot( GradientNoiseDir( i + float2( 0.0, 0.0 ) ), f - float2( 0.0, 0.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 0.0 ) ), f - float2( 1.0, 0.0 ) ), u.x ),
+						lerp( dot( GradientNoiseDir( i + float2( 0.0, 1.0 ) ), f - float2( 0.0, 1.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 1.0 ) ), f - float2( 1.0, 1.0 ) ), u.x ), u.y );
+			}
+			
 
 			VertexOutput VertexFunction( VertexInput v  )
 			{
@@ -327,18 +358,29 @@ Shader "WaterShaderGood"
 				float4 appendResult9 = (float4(ase_worldPos.x , ase_worldPos.z , 0.0 , 0.0));
 				float4 ProjectedUV10 = appendResult9;
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float NormalHeightMap55 = ( ( tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) ) * ase_worldPos.y );
-				float3 temp_cast_2 = (NormalHeightMap55).xxx;
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_3 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_3);
+				float lerpResult122 = lerp( tex2Dlod( _NormalMapHeight, float4( rotator118, 0, 0.0) ).r , tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r , NormalMapRotationNoise96.r);
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 NormalHeightMap55 = ( (-0.1 + (lerpResult122 - 0.0) * (0.9 - -0.1) / (1.0 - 0.0)) * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) );
+				float4 CombinedHeightMap108 = ( NormalHeightMap55 * float4( float3(0,1,0) , 0.0 ) );
 				
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					float3 defaultVertexValue = v.vertex.xyz;
 				#else
 					float3 defaultVertexValue = float3(0, 0, 0);
 				#endif
-				float3 vertexValue = temp_cast_2;
+				float3 vertexValue = CombinedHeightMap108.rgb;
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					v.vertex.xyz = vertexValue;
 				#else
@@ -527,12 +569,26 @@ Shader "WaterShaderGood"
 				float4 WaterColorRegular39 = lerpResult36;
 				
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float3 unpack44 = UnpackNormalScale( tex2D( _NormalMap1, temp_output_49_0.xy ), ( _NormalMapStrength * NormalMapStrengthVariation66 ) );
-				unpack44.z = lerp( 1, unpack44.z, saturate(( _NormalMapStrength * NormalMapStrengthVariation66 )) );
-				float3 NormalMap45 = unpack44;
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 temp_output_75_0 = ( _NormalMapStrength * NormalMapStrengthVariation66 );
+				float3 unpack44 = UnpackNormalScale( tex2D( _NormalMap1, temp_output_49_0.xy ), temp_output_75_0.r );
+				unpack44.z = lerp( 1, unpack44.z, saturate(temp_output_75_0.r) );
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float3 unpack120 = UnpackNormalScale( tex2D( _NormalMap1, rotator118 ), temp_output_75_0.r );
+				unpack120.z = lerp( 1, unpack120.z, saturate(temp_output_75_0.r) );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_13 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_13);
+				float3 lerpResult123 = lerp( unpack44 , unpack120 , NormalMapRotationNoise96.rgb);
+				float3 NormalMap45 = lerpResult123;
 				
 				float3 Albedo = WaterColorRegular39.rgb;
 				float3 Normal = NormalMap45;
@@ -754,18 +810,21 @@ Shader "WaterShaderGood"
 			};
 
 			CBUFFER_START(UnityPerMaterial)
-			float4 _WaterColorDeep;
 			float4 _WaterColorShallow;
-			float2 _TerrainSizeInUnits;
+			float4 _WaterColorDeep;
 			float2 _TerrainPositionInUnits;
-			float _NormalMapScale;
-			float _NormalMapDeformStrength;
-			float _NormalMapStrengthVariationScale;
-			float _NormalMapStrengthVariationBias;
-			float _MaxDepthMapValue;
-			float _WaterDepthMapFalloff;
-			float _WaterDepthMapStrength;
+			float2 _TerrainSizeInUnits;
 			float _NormalMapStrength;
+			float _WaterDepthMapStrength;
+			float _WaterDepthMapFalloff;
+			float _MaxDepthMapValue;
+			float _NormalMapScale;
+			float _NormalMapStrengthVariationBias;
+			float _NormalMapStrengthVariationScale;
+			float _NormalMapDeformStrength;
+			float _NormalRotationNoiseMidpoint;
+			float _NormalRotationNoiseScale;
+			float _NormalRotationNoiseContrast;
 			float _Metallic;
 			float _Smoothness;
 			#ifdef _TRANSMISSION_ASE
@@ -819,6 +878,31 @@ Shader "WaterShaderGood"
 				return 130.0 * dot( m, g );
 			}
 			
+			float4 CalculateContrast( float contrastValue, float4 colorTarget )
+			{
+				float t = 0.5 * ( 1.0 - contrastValue );
+				return mul( float4x4( contrastValue,0,0,t, 0,contrastValue,0,t, 0,0,contrastValue,t, 0,0,0,1 ), colorTarget );
+			}
+			//https://www.shadertoy.com/view/XdXGW8
+			float2 GradientNoiseDir( float2 x )
+			{
+				const float2 k = float2( 0.3183099, 0.3678794 );
+				x = x * k + k.yx;
+				return -1.0 + 2.0 * frac( 16.0 * k * frac( x.x * x.y * ( x.x + x.y ) ) );
+			}
+			
+			float GradientNoise( float2 UV, float Scale )
+			{
+				float2 p = UV * Scale;
+				float2 i = floor( p );
+				float2 f = frac( p );
+				float2 u = f * f * ( 3.0 - 2.0 * f );
+				return lerp( lerp( dot( GradientNoiseDir( i + float2( 0.0, 0.0 ) ), f - float2( 0.0, 0.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 0.0 ) ), f - float2( 1.0, 0.0 ) ), u.x ),
+						lerp( dot( GradientNoiseDir( i + float2( 0.0, 1.0 ) ), f - float2( 0.0, 1.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 1.0 ) ), f - float2( 1.0, 1.0 ) ), u.x ), u.y );
+			}
+			
 
 			float3 _LightDirection;
 
@@ -833,18 +917,29 @@ Shader "WaterShaderGood"
 				float4 appendResult9 = (float4(ase_worldPos.x , ase_worldPos.z , 0.0 , 0.0));
 				float4 ProjectedUV10 = appendResult9;
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float NormalHeightMap55 = ( ( tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) ) * ase_worldPos.y );
-				float3 temp_cast_2 = (NormalHeightMap55).xxx;
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_3 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_3);
+				float lerpResult122 = lerp( tex2Dlod( _NormalMapHeight, float4( rotator118, 0, 0.0) ).r , tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r , NormalMapRotationNoise96.r);
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 NormalHeightMap55 = ( (-0.1 + (lerpResult122 - 0.0) * (0.9 - -0.1) / (1.0 - 0.0)) * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) );
+				float4 CombinedHeightMap108 = ( NormalHeightMap55 * float4( float3(0,1,0) , 0.0 ) );
 				
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					float3 defaultVertexValue = v.vertex.xyz;
 				#else
 					float3 defaultVertexValue = float3(0, 0, 0);
 				#endif
-				float3 vertexValue = temp_cast_2;
+				float3 vertexValue = CombinedHeightMap108.rgb;
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					v.vertex.xyz = vertexValue;
 				#else
@@ -1074,18 +1169,21 @@ Shader "WaterShaderGood"
 			};
 
 			CBUFFER_START(UnityPerMaterial)
-			float4 _WaterColorDeep;
 			float4 _WaterColorShallow;
-			float2 _TerrainSizeInUnits;
+			float4 _WaterColorDeep;
 			float2 _TerrainPositionInUnits;
-			float _NormalMapScale;
-			float _NormalMapDeformStrength;
-			float _NormalMapStrengthVariationScale;
-			float _NormalMapStrengthVariationBias;
-			float _MaxDepthMapValue;
-			float _WaterDepthMapFalloff;
-			float _WaterDepthMapStrength;
+			float2 _TerrainSizeInUnits;
 			float _NormalMapStrength;
+			float _WaterDepthMapStrength;
+			float _WaterDepthMapFalloff;
+			float _MaxDepthMapValue;
+			float _NormalMapScale;
+			float _NormalMapStrengthVariationBias;
+			float _NormalMapStrengthVariationScale;
+			float _NormalMapDeformStrength;
+			float _NormalRotationNoiseMidpoint;
+			float _NormalRotationNoiseScale;
+			float _NormalRotationNoiseContrast;
 			float _Metallic;
 			float _Smoothness;
 			#ifdef _TRANSMISSION_ASE
@@ -1139,6 +1237,31 @@ Shader "WaterShaderGood"
 				return 130.0 * dot( m, g );
 			}
 			
+			float4 CalculateContrast( float contrastValue, float4 colorTarget )
+			{
+				float t = 0.5 * ( 1.0 - contrastValue );
+				return mul( float4x4( contrastValue,0,0,t, 0,contrastValue,0,t, 0,0,contrastValue,t, 0,0,0,1 ), colorTarget );
+			}
+			//https://www.shadertoy.com/view/XdXGW8
+			float2 GradientNoiseDir( float2 x )
+			{
+				const float2 k = float2( 0.3183099, 0.3678794 );
+				x = x * k + k.yx;
+				return -1.0 + 2.0 * frac( 16.0 * k * frac( x.x * x.y * ( x.x + x.y ) ) );
+			}
+			
+			float GradientNoise( float2 UV, float Scale )
+			{
+				float2 p = UV * Scale;
+				float2 i = floor( p );
+				float2 f = frac( p );
+				float2 u = f * f * ( 3.0 - 2.0 * f );
+				return lerp( lerp( dot( GradientNoiseDir( i + float2( 0.0, 0.0 ) ), f - float2( 0.0, 0.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 0.0 ) ), f - float2( 1.0, 0.0 ) ), u.x ),
+						lerp( dot( GradientNoiseDir( i + float2( 0.0, 1.0 ) ), f - float2( 0.0, 1.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 1.0 ) ), f - float2( 1.0, 1.0 ) ), u.x ), u.y );
+			}
+			
 
 			VertexOutput VertexFunction( VertexInput v  )
 			{
@@ -1151,18 +1274,29 @@ Shader "WaterShaderGood"
 				float4 appendResult9 = (float4(ase_worldPos.x , ase_worldPos.z , 0.0 , 0.0));
 				float4 ProjectedUV10 = appendResult9;
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float NormalHeightMap55 = ( ( tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) ) * ase_worldPos.y );
-				float3 temp_cast_2 = (NormalHeightMap55).xxx;
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_3 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_3);
+				float lerpResult122 = lerp( tex2Dlod( _NormalMapHeight, float4( rotator118, 0, 0.0) ).r , tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r , NormalMapRotationNoise96.r);
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 NormalHeightMap55 = ( (-0.1 + (lerpResult122 - 0.0) * (0.9 - -0.1) / (1.0 - 0.0)) * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) );
+				float4 CombinedHeightMap108 = ( NormalHeightMap55 * float4( float3(0,1,0) , 0.0 ) );
 				
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					float3 defaultVertexValue = v.vertex.xyz;
 				#else
 					float3 defaultVertexValue = float3(0, 0, 0);
 				#endif
-				float3 vertexValue = temp_cast_2;
+				float3 vertexValue = CombinedHeightMap108.rgb;
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					v.vertex.xyz = vertexValue;
 				#else
@@ -1381,18 +1515,21 @@ Shader "WaterShaderGood"
 			};
 
 			CBUFFER_START(UnityPerMaterial)
-			float4 _WaterColorDeep;
 			float4 _WaterColorShallow;
-			float2 _TerrainSizeInUnits;
+			float4 _WaterColorDeep;
 			float2 _TerrainPositionInUnits;
-			float _NormalMapScale;
-			float _NormalMapDeformStrength;
-			float _NormalMapStrengthVariationScale;
-			float _NormalMapStrengthVariationBias;
-			float _MaxDepthMapValue;
-			float _WaterDepthMapFalloff;
-			float _WaterDepthMapStrength;
+			float2 _TerrainSizeInUnits;
 			float _NormalMapStrength;
+			float _WaterDepthMapStrength;
+			float _WaterDepthMapFalloff;
+			float _MaxDepthMapValue;
+			float _NormalMapScale;
+			float _NormalMapStrengthVariationBias;
+			float _NormalMapStrengthVariationScale;
+			float _NormalMapDeformStrength;
+			float _NormalRotationNoiseMidpoint;
+			float _NormalRotationNoiseScale;
+			float _NormalRotationNoiseContrast;
 			float _Metallic;
 			float _Smoothness;
 			#ifdef _TRANSMISSION_ASE
@@ -1447,6 +1584,31 @@ Shader "WaterShaderGood"
 				return 130.0 * dot( m, g );
 			}
 			
+			float4 CalculateContrast( float contrastValue, float4 colorTarget )
+			{
+				float t = 0.5 * ( 1.0 - contrastValue );
+				return mul( float4x4( contrastValue,0,0,t, 0,contrastValue,0,t, 0,0,contrastValue,t, 0,0,0,1 ), colorTarget );
+			}
+			//https://www.shadertoy.com/view/XdXGW8
+			float2 GradientNoiseDir( float2 x )
+			{
+				const float2 k = float2( 0.3183099, 0.3678794 );
+				x = x * k + k.yx;
+				return -1.0 + 2.0 * frac( 16.0 * k * frac( x.x * x.y * ( x.x + x.y ) ) );
+			}
+			
+			float GradientNoise( float2 UV, float Scale )
+			{
+				float2 p = UV * Scale;
+				float2 i = floor( p );
+				float2 f = frac( p );
+				float2 u = f * f * ( 3.0 - 2.0 * f );
+				return lerp( lerp( dot( GradientNoiseDir( i + float2( 0.0, 0.0 ) ), f - float2( 0.0, 0.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 0.0 ) ), f - float2( 1.0, 0.0 ) ), u.x ),
+						lerp( dot( GradientNoiseDir( i + float2( 0.0, 1.0 ) ), f - float2( 0.0, 1.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 1.0 ) ), f - float2( 1.0, 1.0 ) ), u.x ), u.y );
+			}
+			
 
 			VertexOutput VertexFunction( VertexInput v  )
 			{
@@ -1459,11 +1621,22 @@ Shader "WaterShaderGood"
 				float4 appendResult9 = (float4(ase_worldPos.x , ase_worldPos.z , 0.0 , 0.0));
 				float4 ProjectedUV10 = appendResult9;
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float NormalHeightMap55 = ( ( tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) ) * ase_worldPos.y );
-				float3 temp_cast_2 = (NormalHeightMap55).xxx;
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_3 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_3);
+				float lerpResult122 = lerp( tex2Dlod( _NormalMapHeight, float4( rotator118, 0, 0.0) ).r , tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r , NormalMapRotationNoise96.r);
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 NormalHeightMap55 = ( (-0.1 + (lerpResult122 - 0.0) * (0.9 - -0.1) / (1.0 - 0.0)) * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) );
+				float4 CombinedHeightMap108 = ( NormalHeightMap55 * float4( float3(0,1,0) , 0.0 ) );
 				
 				
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
@@ -1471,7 +1644,7 @@ Shader "WaterShaderGood"
 				#else
 					float3 defaultVertexValue = float3(0, 0, 0);
 				#endif
-				float3 vertexValue = temp_cast_2;
+				float3 vertexValue = CombinedHeightMap108.rgb;
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					v.vertex.xyz = vertexValue;
 				#else
@@ -1694,18 +1867,21 @@ Shader "WaterShaderGood"
 			};
 
 			CBUFFER_START(UnityPerMaterial)
-			float4 _WaterColorDeep;
 			float4 _WaterColorShallow;
-			float2 _TerrainSizeInUnits;
+			float4 _WaterColorDeep;
 			float2 _TerrainPositionInUnits;
-			float _NormalMapScale;
-			float _NormalMapDeformStrength;
-			float _NormalMapStrengthVariationScale;
-			float _NormalMapStrengthVariationBias;
-			float _MaxDepthMapValue;
-			float _WaterDepthMapFalloff;
-			float _WaterDepthMapStrength;
+			float2 _TerrainSizeInUnits;
 			float _NormalMapStrength;
+			float _WaterDepthMapStrength;
+			float _WaterDepthMapFalloff;
+			float _MaxDepthMapValue;
+			float _NormalMapScale;
+			float _NormalMapStrengthVariationBias;
+			float _NormalMapStrengthVariationScale;
+			float _NormalMapDeformStrength;
+			float _NormalRotationNoiseMidpoint;
+			float _NormalRotationNoiseScale;
+			float _NormalRotationNoiseContrast;
 			float _Metallic;
 			float _Smoothness;
 			#ifdef _TRANSMISSION_ASE
@@ -1760,6 +1936,31 @@ Shader "WaterShaderGood"
 				return 130.0 * dot( m, g );
 			}
 			
+			float4 CalculateContrast( float contrastValue, float4 colorTarget )
+			{
+				float t = 0.5 * ( 1.0 - contrastValue );
+				return mul( float4x4( contrastValue,0,0,t, 0,contrastValue,0,t, 0,0,contrastValue,t, 0,0,0,1 ), colorTarget );
+			}
+			//https://www.shadertoy.com/view/XdXGW8
+			float2 GradientNoiseDir( float2 x )
+			{
+				const float2 k = float2( 0.3183099, 0.3678794 );
+				x = x * k + k.yx;
+				return -1.0 + 2.0 * frac( 16.0 * k * frac( x.x * x.y * ( x.x + x.y ) ) );
+			}
+			
+			float GradientNoise( float2 UV, float Scale )
+			{
+				float2 p = UV * Scale;
+				float2 i = floor( p );
+				float2 f = frac( p );
+				float2 u = f * f * ( 3.0 - 2.0 * f );
+				return lerp( lerp( dot( GradientNoiseDir( i + float2( 0.0, 0.0 ) ), f - float2( 0.0, 0.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 0.0 ) ), f - float2( 1.0, 0.0 ) ), u.x ),
+						lerp( dot( GradientNoiseDir( i + float2( 0.0, 1.0 ) ), f - float2( 0.0, 1.0 ) ),
+						dot( GradientNoiseDir( i + float2( 1.0, 1.0 ) ), f - float2( 1.0, 1.0 ) ), u.x ), u.y );
+			}
+			
 
 			VertexOutput VertexFunction( VertexInput v  )
 			{
@@ -1772,11 +1973,22 @@ Shader "WaterShaderGood"
 				float4 appendResult9 = (float4(ase_worldPos.x , ase_worldPos.z , 0.0 , 0.0));
 				float4 ProjectedUV10 = appendResult9;
 				float4 temp_output_49_0 = (ProjectedUV10*_NormalMapScale + 0.0);
-				float simplePerlin2D65 = snoise( ProjectedUV10.xy*_NormalMapStrengthVariationScale );
-				simplePerlin2D65 = simplePerlin2D65*0.5 + 0.5;
-				float NormalMapStrengthVariation66 = (( 1.0 - _NormalMapStrengthVariationBias ) + (pow( simplePerlin2D65 , 1.3 ) - 0.0) * (( 1.0 + _NormalMapStrengthVariationBias ) - ( 1.0 - _NormalMapStrengthVariationBias )) / (1.0 - 0.0));
-				float NormalHeightMap55 = ( ( tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) ) * ase_worldPos.y );
-				float3 temp_cast_2 = (NormalHeightMap55).xxx;
+				float cos118 = cos( 0.2 );
+				float sin118 = sin( 0.2 );
+				float2 rotator118 = mul( ( temp_output_49_0 * 1.3 ).xy - float2( 0,0 ) , float2x2( cos118 , -sin118 , sin118 , cos118 )) + float2( 0,0 );
+				float simplePerlin2D92 = snoise( ProjectedUV10.xy*_NormalRotationNoiseScale );
+				simplePerlin2D92 = simplePerlin2D92*0.5 + 0.5;
+				float4 temp_cast_3 = (( simplePerlin2D92 + _NormalRotationNoiseMidpoint )).xxxx;
+				float4 NormalMapRotationNoise96 = CalculateContrast(_NormalRotationNoiseContrast,temp_cast_3);
+				float lerpResult122 = lerp( tex2Dlod( _NormalMapHeight, float4( rotator118, 0, 0.0) ).r , tex2Dlod( _NormalMapHeight, float4( temp_output_49_0.xy, 0, 0.0) ).r , NormalMapRotationNoise96.r);
+				float gradientNoise65 = GradientNoise(ProjectedUV10.xy,_NormalMapStrengthVariationScale);
+				gradientNoise65 = gradientNoise65*0.5 + 0.5;
+				float4 temp_cast_6 = (( gradientNoise65 + -0.67 )).xxxx;
+				float4 temp_cast_7 = (( 1.0 - _NormalMapStrengthVariationBias )).xxxx;
+				float4 temp_cast_8 = (( 1.0 + _NormalMapStrengthVariationBias )).xxxx;
+				float4 NormalMapStrengthVariation66 = (temp_cast_7 + (CalculateContrast(1.49,temp_cast_6) - float4( 0,0,0,0 )) * (temp_cast_8 - temp_cast_7) / (float4( 1,1,1,1 ) - float4( 0,0,0,0 )));
+				float4 NormalHeightMap55 = ( (-0.1 + (lerpResult122 - 0.0) * (0.9 - -0.1) / (1.0 - 0.0)) * ( _NormalMapDeformStrength * NormalMapStrengthVariation66 ) );
+				float4 CombinedHeightMap108 = ( NormalHeightMap55 * float4( float3(0,1,0) , 0.0 ) );
 				
 				
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
@@ -1784,7 +1996,7 @@ Shader "WaterShaderGood"
 				#else
 					float3 defaultVertexValue = float3(0, 0, 0);
 				#endif
-				float3 vertexValue = temp_cast_2;
+				float3 vertexValue = CombinedHeightMap108.rgb;
 				#ifdef ASE_ABSOLUTE_VERTEX_POS
 					v.vertex.xyz = vertexValue;
 				#else
@@ -1940,134 +2152,184 @@ Shader "WaterShaderGood"
 }
 /*ASEBEGIN
 Version=18900
-0;72.44444;1012;572;686.7405;272.7803;1;True;False
+0;72.44444;945.6667;571.8889;5558.349;950.4532;5.578001;True;False
 Node;AmplifyShaderEditor.CommentaryNode;16;-8282.223,-177.8172;Inherit;False;664.0083;254.0788;ProjectUVFromAbove;3;8;9;10;;1,1,1,1;0;0
 Node;AmplifyShaderEditor.WorldPosInputsNode;8;-8232.223,-127.8171;Inherit;False;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
-Node;AmplifyShaderEditor.CommentaryNode;15;-5970.572,-1273.917;Inherit;False;2763.752;730.1431;WaterDepthMap;19;40;28;13;26;27;25;24;7;20;6;23;18;12;22;19;21;17;41;42;;1,1,1,1;0;0
 Node;AmplifyShaderEditor.DynamicAppendNode;9;-8031.975,-103.6273;Inherit;False;FLOAT4;4;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;0;False;3;FLOAT;0;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.CommentaryNode;15;-5970.572,-1273.917;Inherit;False;2763.752;730.1431;WaterDepthMap;19;40;28;13;26;27;25;24;7;20;6;23;18;12;22;19;21;17;41;42;;1,1,1,1;0;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;10;-7842.659,-82.48677;Inherit;False;ProjectedUV;-1;True;1;0;FLOAT4;0,0,0,0;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.CommentaryNode;104;-6061.494,-388.0322;Inherit;False;1467.957;420.207;NormalMapRotation;8;103;97;99;92;101;100;102;96;;1,1,1,1;0;0
+Node;AmplifyShaderEditor.CommentaryNode;72;-3323.884,1883.305;Inherit;False;1588.497;389.5402;NormalMapStrengthVariation;12;67;85;88;89;65;87;66;81;80;82;79;71;;1,1,1,1;0;0
 Node;AmplifyShaderEditor.Vector2Node;17;-5790.686,-731.3271;Inherit;False;Property;_TerrainSizeInUnits;Terrain Size In Units;3;0;Create;True;0;0;0;False;0;False;40,40;40,40;0;3;FLOAT2;0;FLOAT;1;FLOAT;2
 Node;AmplifyShaderEditor.Vector2Node;21;-5614.604,-943.2087;Inherit;False;Property;_TerrainPositionInUnits;Terrain Position In Units;4;0;Create;True;0;0;0;False;0;False;0,0;0,0;0;3;FLOAT2;0;FLOAT;1;FLOAT;2
-Node;AmplifyShaderEditor.RegisterLocalVarNode;10;-7842.659,-82.48677;Inherit;False;ProjectedUV;-1;True;1;0;FLOAT4;0,0,0,0;False;1;FLOAT4;0
-Node;AmplifyShaderEditor.RangedFloatNode;19;-5788.285,-825.8103;Inherit;False;Constant;_Float0;Float 0;1;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.GetLocalVarNode;103;-5973.563,-338.0322;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.RangedFloatNode;97;-6011.494,-252.0233;Inherit;False;Property;_NormalRotationNoiseScale;Normal Rotation Noise Scale;18;0;Create;True;0;0;0;False;0;False;0;0;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.SimpleDivideOpNode;22;-5378.075,-872.9748;Inherit;False;2;0;FLOAT2;0,0;False;1;FLOAT2;0,0;False;1;FLOAT2;0
+Node;AmplifyShaderEditor.RangedFloatNode;71;-3276.523,2076.68;Inherit;False;Property;_NormalMapStrengthVariationScale;Normal Map Strength Variation Scale;15;0;Create;True;0;0;0;False;0;False;0.5;0.5;0;1;0;1;FLOAT;0
+Node;AmplifyShaderEditor.GetLocalVarNode;79;-3268.649,1931.175;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.RangedFloatNode;19;-5788.285,-825.8103;Inherit;False;Constant;_Float0;Float 0;1;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.NoiseGeneratorNode;65;-3049.759,1933.305;Inherit;False;Gradient;True;False;2;0;FLOAT2;0,0;False;1;FLOAT;1;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;50;-3505.447,900.85;Inherit;False;Property;_NormalMapScale;Normal Map Scale;13;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.SimpleDivideOpNode;18;-5581.446,-813.2608;Inherit;False;2;0;FLOAT;0;False;1;FLOAT2;0,0;False;1;FLOAT2;0
 Node;AmplifyShaderEditor.GetLocalVarNode;12;-5909.572,-939.7529;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.GetLocalVarNode;48;-3507.501,780.8891;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
 Node;AmplifyShaderEditor.NegateNode;23;-5239.077,-893.9748;Inherit;False;1;0;FLOAT2;0,0;False;1;FLOAT2;0
-Node;AmplifyShaderEditor.CommentaryNode;72;-3323.884,1891.438;Inherit;False;1120.258;334.9626;NormalMapStrengthVariation;9;66;67;65;71;79;80;81;82;83;;1,1,1,1;0;0
-Node;AmplifyShaderEditor.ScaleAndOffsetNode;20;-5104.813,-1062.039;Inherit;False;3;0;FLOAT4;0,0,0,0;False;1;FLOAT4;1,0,0,0;False;2;FLOAT4;0,0,0,0;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.RangedFloatNode;99;-5796.119,-163.4733;Inherit;False;Property;_NormalRotationNoiseMidpoint;Normal Rotation Noise Midpoint;19;0;Create;True;0;0;0;False;0;False;-0.67;-0.67;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.NoiseGeneratorNode;92;-5718.609,-275.3029;Inherit;False;Simplex2D;True;False;2;0;FLOAT2;0,0;False;1;FLOAT;1;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;89;-2955.498,2047.823;Inherit;False;Constant;_Midpoint;Midpoint;18;0;Create;True;0;0;0;False;0;False;-0.67;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleAddOpNode;88;-2787.941,1935.347;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;85;-2624.396,2045.517;Inherit;False;Constant;_Contrastidk;Contrast? idk;17;0;Create;True;0;0;0;False;0;False;1.49;0;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.TexturePropertyNode;6;-5362.864,-1226.577;Inherit;True;Property;_WaterDepthMap;WaterDepthMap;2;0;Create;True;0;0;0;False;0;False;82bda4eb90f7aa543b07449b2bc0e898;82bda4eb90f7aa543b07449b2bc0e898;False;white;Auto;Texture2D;-1;0;2;SAMPLER2D;0;SAMPLERSTATE;1
-Node;AmplifyShaderEditor.GetLocalVarNode;79;-3257.816,1942.008;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
-Node;AmplifyShaderEditor.SamplerNode;7;-4878.903,-1141.897;Inherit;True;Property;_TextureSample0;Texture Sample 0;1;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.ScaleAndOffsetNode;20;-5104.813,-1062.039;Inherit;False;3;0;FLOAT4;0,0,0,0;False;1;FLOAT4;1,0,0,0;False;2;FLOAT4;0,0,0,0;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.RangedFloatNode;100;-5638.634,-83.04734;Inherit;False;Property;_NormalRotationNoiseContrast;Normal Rotation Noise Contrast;17;0;Create;True;0;0;0;False;0;False;1.49;1.49;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleAddOpNode;101;-5457.663,-266.4558;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;82;-2694.749,2145.303;Inherit;False;Property;_NormalMapStrengthVariationBias;Normal Map Strength Variation Bias;16;0;Create;True;0;0;0;False;0;False;0.4771704;0.4771704;0;1;0;1;FLOAT;0
+Node;AmplifyShaderEditor.ScaleAndOffsetNode;49;-3279.171,783.9517;Inherit;False;3;0;FLOAT4;0,0,0,0;False;1;FLOAT;1;False;2;FLOAT;0;False;1;FLOAT4;0
+Node;AmplifyShaderEditor.RangedFloatNode;119;-3161.28,902.2104;Inherit;False;Constant;_SecondNormalMapRotation;Second Normal Map Rotation;20;0;Create;True;0;0;0;False;0;False;0.2;0.5;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.ScaleNode;117;-3011.477,793.9915;Inherit;False;1.3;1;0;FLOAT4;0,0,0,0;False;1;FLOAT4;0
 Node;AmplifyShaderEditor.RangedFloatNode;41;-4722.829,-834.9176;Inherit;False;Property;_MaxDepthMapValue;Max Depth Map Value;7;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;71;-3314.32,2044.703;Inherit;False;Property;_NormalMapStrengthVariationScale;Normal Map Strength Variation Scale;15;0;Create;True;0;0;0;False;0;False;0.5;0.5;0;1;0;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleAddOpNode;80;-2360.749,2151.303;Inherit;False;2;2;0;FLOAT;1;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleContrastOpNode;102;-5282.667,-283.5813;Inherit;False;2;1;COLOR;0,0,0,0;False;0;FLOAT;0;False;1;COLOR;0
+Node;AmplifyShaderEditor.SimpleContrastOpNode;87;-2424.424,1935.853;Inherit;False;2;1;COLOR;0,0,0,0;False;0;FLOAT;0;False;1;COLOR;0
+Node;AmplifyShaderEditor.SimpleSubtractOpNode;81;-2361.749,2052.303;Inherit;False;2;0;FLOAT;1;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SamplerNode;7;-4878.903,-1141.897;Inherit;True;Property;_TextureSample0;Texture Sample 0;1;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.TFHCRemapNode;67;-2208.31,1932.983;Inherit;False;5;0;COLOR;0,0,0,0;False;1;COLOR;0,0,0,0;False;2;COLOR;1,1,1,1;False;3;COLOR;0,0,0,0;False;4;COLOR;1,1,1,1;False;1;COLOR;0
 Node;AmplifyShaderEditor.ClampOpNode;42;-4508.445,-1098.378;Inherit;False;3;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;1;FLOAT;0
-Node;AmplifyShaderEditor.NoiseGeneratorNode;65;-3049.759,1941.438;Inherit;False;Simplex2D;True;False;2;0;FLOAT2;0,0;False;1;FLOAT;1;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;82;-3226.077,2132.947;Inherit;False;Property;_NormalMapStrengthVariationBias;Normal Map Strength Variation Bias;16;0;Create;True;0;0;0;False;0;False;0.4771704;0.4771704;0;1;0;1;FLOAT;0
-Node;AmplifyShaderEditor.TFHCRemapNode;40;-4325.724,-1107.224;Inherit;False;5;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;3;FLOAT;0;False;4;FLOAT;1;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;96;-4876.238,-282.2039;Inherit;False;NormalMapRotationNoise;-1;True;1;0;COLOR;0,0,0,0;False;1;COLOR;0
+Node;AmplifyShaderEditor.RotatorNode;118;-2857.777,795.7104;Inherit;False;3;0;FLOAT2;0,0;False;1;FLOAT2;0,0;False;2;FLOAT;1;False;1;FLOAT2;0
+Node;AmplifyShaderEditor.TexturePropertyNode;54;-2804.013,1160.983;Inherit;True;Property;_NormalMapHeight;Normal Map Height;11;0;Create;True;0;0;0;False;0;False;None;None;False;white;Auto;Texture2D;-1;0;2;SAMPLER2D;0;SAMPLERSTATE;1
+Node;AmplifyShaderEditor.GetLocalVarNode;105;-2229.305,811.8683;Inherit;False;96;NormalMapRotationNoise;1;0;OBJECT;;False;1;COLOR;0
+Node;AmplifyShaderEditor.SamplerNode;53;-2438.531,1177.762;Inherit;True;Property;_TextureSample2;Texture Sample 2;9;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.SamplerNode;121;-2440.335,971.6508;Inherit;True;Property;_TextureSample4;Texture Sample 4;9;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
 Node;AmplifyShaderEditor.RangedFloatNode;24;-4434.408,-918.3047;Inherit;False;Property;_WaterDepthMapFalloff;Water Depth Map Falloff;5;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.SimpleAddOpNode;80;-2892.077,2138.947;Inherit;False;2;2;0;FLOAT;1;False;1;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.SimpleSubtractOpNode;81;-2893.077,2039.947;Inherit;False;2;0;FLOAT;1;False;1;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.PowerNode;83;-2817.839,1945;Inherit;False;False;2;0;FLOAT;0;False;1;FLOAT;1.3;False;1;FLOAT;0
-Node;AmplifyShaderEditor.TFHCRemapNode;67;-2646.458,1949.289;Inherit;False;5;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;3;FLOAT;0;False;4;FLOAT;1;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;27;-4137.836,-925.9372;Inherit;False;Property;_WaterDepthMapStrength;Water Depth Map Strength;6;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.TFHCRemapNode;40;-4325.724,-1107.224;Inherit;False;5;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;3;FLOAT;0;False;4;FLOAT;1;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;66;-2021.211,1935.18;Inherit;False;NormalMapStrengthVariation;-1;True;1;0;COLOR;0,0,0,0;False;1;COLOR;0
+Node;AmplifyShaderEditor.RangedFloatNode;58;-1986.655,1476.733;Inherit;False;Property;_NormalMapDeformStrength;Normal Map Deform Strength;14;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.GetLocalVarNode;74;-1956.526,1589.248;Inherit;False;66;NormalMapStrengthVariation;1;0;OBJECT;;False;1;COLOR;0
+Node;AmplifyShaderEditor.LerpOp;122;-1885.902,966.4548;Inherit;False;3;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;0;False;1;FLOAT;0
 Node;AmplifyShaderEditor.PowerNode;25;-4087.391,-1076.192;Inherit;False;False;2;0;FLOAT;0;False;1;FLOAT;1;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;27;-4137.836,-925.9372;Inherit;False;Property;_WaterDepthMapStrength;Water Depth Map Strength;6;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.SimpleMultiplyOpNode;26;-3915.358,-1064.844;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;50;-3173.163,521.9874;Inherit;False;Property;_NormalMapScale;Normal Map Scale;13;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.GetLocalVarNode;48;-3156.513,381.3684;Inherit;False;10;ProjectedUV;1;0;OBJECT;;False;1;FLOAT4;0
-Node;AmplifyShaderEditor.RegisterLocalVarNode;66;-2460.607,1960.078;Inherit;False;NormalMapStrengthVariation;-1;True;1;0;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleMultiplyOpNode;73;-1603.418,1451.841;Inherit;False;2;2;0;FLOAT;0;False;1;COLOR;0,0,0,0;False;1;COLOR;0
+Node;AmplifyShaderEditor.TFHCRemapNode;114;-1731.969,1204.87;Inherit;False;5;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;3;FLOAT;-0.1;False;4;FLOAT;0.9;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleMultiplyOpNode;57;-1483.325,1219.329;Inherit;False;2;2;0;COLOR;0,0,0,0;False;1;COLOR;0,0,0,0;False;1;COLOR;0
 Node;AmplifyShaderEditor.ClampOpNode;28;-3744.597,-1076.263;Inherit;False;3;0;FLOAT;0;False;1;FLOAT;0;False;2;FLOAT;1;False;1;FLOAT;0
-Node;AmplifyShaderEditor.GetLocalVarNode;74;-2680.381,1195.464;Inherit;False;66;NormalMapStrengthVariation;1;0;OBJECT;;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;58;-2759.615,1079.356;Inherit;False;Property;_NormalMapDeformStrength;Normal Map Deform Strength;14;0;Create;True;0;0;0;False;0;False;1;1;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.ScaleAndOffsetNode;49;-2829.406,352.8568;Inherit;False;3;0;FLOAT4;0,0,0,0;False;1;FLOAT;1;False;2;FLOAT;0;False;1;FLOAT4;0
-Node;AmplifyShaderEditor.TexturePropertyNode;54;-2885.239,797.0878;Inherit;True;Property;_NormalMapHeight;Normal Map Height;11;0;Create;True;0;0;0;False;0;False;None;None;False;white;Auto;Texture2D;-1;0;2;SAMPLER2D;0;SAMPLERSTATE;1
-Node;AmplifyShaderEditor.RegisterLocalVarNode;13;-3514.93,-1078.68;Inherit;False;WaterDepthMap;-1;True;1;0;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;55;-1312.141,1207.026;Inherit;False;NormalHeightMap;-1;True;1;0;COLOR;0,0,0,0;False;1;COLOR;0
 Node;AmplifyShaderEditor.CommentaryNode;38;-1497.463,-1591.078;Inherit;False;857.3636;545.3189;WaterColorRegular;5;39;37;34;33;36;;1,1,1,1;0;0
-Node;AmplifyShaderEditor.SimpleMultiplyOpNode;73;-2376.381,1054.464;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.SamplerNode;53;-2533.244,806.1606;Inherit;True;Property;_TextureSample2;Texture Sample 2;9;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.SimpleMultiplyOpNode;57;-2198.757,835.0576;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.WorldPosInputsNode;61;-2112.511,1032.287;Inherit;False;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
-Node;AmplifyShaderEditor.GetLocalVarNode;37;-1389.314,-1154.233;Inherit;False;13;WaterDepthMap;1;0;OBJECT;;False;1;FLOAT;0
-Node;AmplifyShaderEditor.ColorNode;34;-1428.797,-1347.079;Inherit;False;Property;_WaterColorShallow;Water Color Shallow;8;0;Create;True;0;0;0;False;0;False;0,0,0,0;0,0,0,0;True;0;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.CommentaryNode;109;-883.3079,1079.969;Inherit;False;1042.784;406.3632;CombineHeightMaps;4;107;106;62;108;;1,1,1,1;0;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;13;-3514.93,-1078.68;Inherit;False;WaterDepthMap;-1;True;1;0;FLOAT;0;False;1;FLOAT;0
 Node;AmplifyShaderEditor.ColorNode;33;-1424.463,-1529.523;Inherit;False;Property;_WaterColorDeep;Water Color Deep;9;0;Create;True;0;0;0;False;0;False;0,0,0,0;0,0,0,0;True;0;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.SimpleMultiplyOpNode;62;-1907.11,832.086;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.ColorNode;34;-1428.797,-1347.079;Inherit;False;Property;_WaterColorShallow;Water Color Shallow;8;0;Create;True;0;0;0;False;0;False;0,0,0,0;0,0,0,0;True;0;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.GetLocalVarNode;107;-833.3079,1129.969;Inherit;False;55;NormalHeightMap;1;0;OBJECT;;False;1;COLOR;0
+Node;AmplifyShaderEditor.Vector3Node;106;-471.7295,1298.443;Inherit;False;Constant;_Vector0;Vector 0;21;0;Create;True;0;0;0;False;0;False;0,1,0;0,0,0;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
+Node;AmplifyShaderEditor.GetLocalVarNode;37;-1389.314,-1154.233;Inherit;False;13;WaterDepthMap;1;0;OBJECT;;False;1;FLOAT;0
 Node;AmplifyShaderEditor.LerpOp;36;-1056.609,-1383.7;Inherit;False;3;0;COLOR;0,0,0,0;False;1;COLOR;0,0,0,0;False;2;FLOAT;0;False;1;COLOR;0
-Node;AmplifyShaderEditor.RegisterLocalVarNode;55;-1708.654,829.9753;Inherit;False;NormalHeightMap;-1;True;1;0;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleMultiplyOpNode;62;-266.4004,1127.969;Inherit;False;2;2;0;COLOR;0,0,0,0;False;1;FLOAT3;0,0,0;False;1;COLOR;0
+Node;AmplifyShaderEditor.RegisterLocalVarNode;108;-101.8567,1133.596;Inherit;False;CombinedHeightMap;-1;True;1;0;COLOR;0,0,0,0;False;1;COLOR;0
 Node;AmplifyShaderEditor.RegisterLocalVarNode;39;-844.3934,-1405.964;Inherit;False;WaterColorRegular;-1;True;1;0;COLOR;0,0,0,0;False;1;COLOR;0
-Node;AmplifyShaderEditor.GetLocalVarNode;14;-441.7516,-105.3975;Inherit;False;39;WaterColorRegular;1;0;OBJECT;;False;1;COLOR;0
-Node;AmplifyShaderEditor.RegisterLocalVarNode;45;-1731.433,298.7244;Inherit;False;NormalMap;-1;True;1;0;FLOAT3;0,0,0;False;1;FLOAT3;0
-Node;AmplifyShaderEditor.SimpleMultiplyOpNode;75;-2482.409,437.1484;Inherit;False;2;2;0;FLOAT;0;False;1;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.SimpleMultiplyOpNode;75;-2534.75,502.8372;Inherit;False;2;2;0;FLOAT;0;False;1;COLOR;0,0,0,0;False;1;COLOR;0
 Node;AmplifyShaderEditor.SamplerNode;44;-2338.446,340.1323;Inherit;True;Property;_TextureSample1;Texture Sample 1;9;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;True;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.GetLocalVarNode;78;-185.7412,-189.7304;Inherit;False;66;NormalMapStrengthVariation;1;0;OBJECT;;False;1;FLOAT;0
-Node;AmplifyShaderEditor.GetLocalVarNode;76;-2710.409,574.1481;Inherit;False;66;NormalMapStrengthVariation;1;0;OBJECT;;False;1;FLOAT;0
-Node;AmplifyShaderEditor.GetLocalVarNode;56;-341.1481,250.3479;Inherit;False;55;NormalHeightMap;1;0;OBJECT;;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;52;-162.2672,137.5476;Inherit;False;Property;_Smoothness;Smoothness;0;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;47;-2709.585,476.5106;Inherit;False;Property;_NormalMapStrength;Normal Map Strength;12;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;51;-298.2671,126.5476;Inherit;False;Property;_Metallic;Metallic;1;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.GetLocalVarNode;46;-455.8781,46.94727;Inherit;False;45;NormalMap;1;0;OBJECT;;False;1;FLOAT3;0
+Node;AmplifyShaderEditor.LerpOp;123;-1871.892,587.3621;Inherit;False;3;0;FLOAT3;0,0,0;False;1;FLOAT3;0,0,0;False;2;FLOAT3;0,0,0;False;1;FLOAT3;0
+Node;AmplifyShaderEditor.GetLocalVarNode;76;-2891.858,522.7125;Inherit;False;66;NormalMapStrengthVariation;1;0;OBJECT;;False;1;COLOR;0
 Node;AmplifyShaderEditor.TexturePropertyNode;43;-2604.973,120.7164;Inherit;True;Property;_NormalMap1;NormalMap1;10;0;Create;True;0;0;0;False;0;False;None;None;False;white;Auto;Texture2D;-1;0;2;SAMPLER2D;0;SAMPLERSTATE;1
-Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;4;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;Meta;0;4;Meta;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;2;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;1;LightMode=Meta;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
+Node;AmplifyShaderEditor.RangedFloatNode;47;-2794.057,390.0263;Inherit;False;Property;_NormalMapStrength;Normal Map Strength;12;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.SamplerNode;120;-2327.309,582.7917;Inherit;True;Property;_TextureSample3;Texture Sample 3;9;0;Create;True;0;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;True;Object;-1;Auto;Texture2D;8;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;6;FLOAT;0;False;7;SAMPLERSTATE;;False;5;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.RegisterLocalVarNode;45;-1511.285,334.4849;Inherit;False;NormalMap;-1;True;1;0;FLOAT3;0,0,0;False;1;FLOAT3;0
+Node;AmplifyShaderEditor.RangedFloatNode;52;-162.2672,137.5476;Inherit;False;Property;_Smoothness;Smoothness;0;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;51;-298.2671,126.5476;Inherit;False;Property;_Metallic;Metallic;1;0;Create;True;0;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.GetLocalVarNode;78;-177.7412,-229.7304;Inherit;False;96;NormalMapRotationNoise;1;0;OBJECT;;False;1;COLOR;0
+Node;AmplifyShaderEditor.GetLocalVarNode;14;-441.7516,-105.3975;Inherit;False;39;WaterColorRegular;1;0;OBJECT;;False;1;COLOR;0
+Node;AmplifyShaderEditor.GetLocalVarNode;46;-455.8781,46.94727;Inherit;False;45;NormalMap;1;0;OBJECT;;False;1;FLOAT3;0
+Node;AmplifyShaderEditor.GetLocalVarNode;56;-341.1481,250.3479;Inherit;False;108;CombinedHeightMap;1;0;OBJECT;;False;1;COLOR;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;3;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;DepthOnly;0;3;DepthOnly;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;False;False;True;False;False;False;False;0;False;-1;False;False;False;False;False;False;False;False;False;True;1;False;-1;False;False;True;1;LightMode=DepthOnly;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
+Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;4;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;Meta;0;4;Meta;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;2;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;1;LightMode=Meta;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
+Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;0;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ExtraPrePass;0;0;ExtraPrePass;5;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;True;1;1;False;-1;0;False;-1;0;1;False;-1;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;True;True;True;True;0;False;-1;False;False;False;False;False;False;False;True;False;255;False;-1;255;False;-1;255;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;False;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;0;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;1;0,0;Float;False;True;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;WaterShaderGood;94348b07e5e8bab40bd6c8a1e3df54cd;True;Forward;0;1;Forward;18;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;True;1;1;False;-1;0;False;-1;1;1;False;-1;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;True;True;True;True;0;False;-1;False;False;False;False;False;False;False;True;False;255;False;-1;255;False;-1;255;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;False;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;1;LightMode=UniversalForward;False;0;Hidden/InternalErrorShader;0;0;Standard;38;Workflow;1;Surface;0;  Refraction Model;0;  Blend;0;Two Sided;1;Fragment Normal Space,InvertActionOnDeselection;0;Transmission;0;  Transmission Shadow;0.5,False,-1;Translucency;0;  Translucency Strength;1,False,-1;  Normal Distortion;0.5,False,-1;  Scattering;2,False,-1;  Direct;0.9,False,-1;  Ambient;0.1,False,-1;  Shadow;0.5,False,-1;Cast Shadows;1;  Use Shadow Threshold;0;Receive Shadows;1;GPU Instancing;1;LOD CrossFade;1;Built-in Fog;1;_FinalColorxAlpha;0;Meta Pass;1;Override Baked GI;0;Extra Pre Pass;0;DOTS Instancing;0;Tessellation;1;  Phong;0;  Strength;0.5,False,-1;  Type;1;  Tess;16,False,-1;  Min;10,False,-1;  Max;25,False,-1;  Edge Length;16,False,-1;  Max Displacement;25,False,-1;Write Depth;0;  Early Z;0;Vertex Position,InvertActionOnDeselection;1;0;6;False;True;True;True;True;True;False;;False;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;2;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ShadowCaster;0;2;ShadowCaster;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;True;1;False;-1;True;3;False;-1;False;True;1;LightMode=ShadowCaster;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
-Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;0;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ExtraPrePass;0;0;ExtraPrePass;5;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;True;1;1;False;-1;0;False;-1;0;1;False;-1;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;True;True;True;True;0;False;-1;False;False;False;False;False;False;False;True;False;255;False;-1;255;False;-1;255;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;False;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;0;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;5;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;1;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;Universal2D;0;5;Universal2D;0;False;False;False;False;False;False;False;False;False;False;False;False;True;0;False;-1;False;True;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;True;1;1;False;-1;0;False;-1;1;1;False;-1;0;False;-1;False;False;False;False;False;False;False;False;False;False;False;False;False;False;True;True;True;True;True;0;False;-1;False;False;False;False;False;False;False;False;False;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;1;LightMode=Universal2D;False;0;Hidden/InternalErrorShader;0;0;Standard;0;False;0
 WireConnection;9;0;8;1
 WireConnection;9;1;8;3
 WireConnection;10;0;9;0
 WireConnection;22;0;21;0
 WireConnection;22;1;17;0
+WireConnection;65;0;79;0
+WireConnection;65;1;71;0
 WireConnection;18;0;19;0
 WireConnection;18;1;17;0
 WireConnection;23;0;22;0
+WireConnection;92;0;103;0
+WireConnection;92;1;97;0
+WireConnection;88;0;65;0
+WireConnection;88;1;89;0
 WireConnection;20;0;12;0
 WireConnection;20;1;18;0
 WireConnection;20;2;23;0
+WireConnection;101;0;92;0
+WireConnection;101;1;99;0
+WireConnection;49;0;48;0
+WireConnection;49;1;50;0
+WireConnection;117;0;49;0
+WireConnection;80;1;82;0
+WireConnection;102;1;101;0
+WireConnection;102;0;100;0
+WireConnection;87;1;88;0
+WireConnection;87;0;85;0
+WireConnection;81;1;82;0
 WireConnection;7;0;6;0
 WireConnection;7;1;20;0
-WireConnection;42;0;7;1
-WireConnection;42;2;41;0
-WireConnection;65;0;79;0
-WireConnection;65;1;71;0
-WireConnection;40;0;42;0
-WireConnection;40;2;41;0
-WireConnection;80;1;82;0
-WireConnection;81;1;82;0
-WireConnection;83;0;65;0
-WireConnection;67;0;83;0
+WireConnection;67;0;87;0
 WireConnection;67;3;81;0
 WireConnection;67;4;80;0
+WireConnection;42;0;7;1
+WireConnection;42;2;41;0
+WireConnection;96;0;102;0
+WireConnection;118;0;117;0
+WireConnection;118;2;119;0
+WireConnection;53;0;54;0
+WireConnection;53;1;49;0
+WireConnection;121;0;54;0
+WireConnection;121;1;118;0
+WireConnection;40;0;42;0
+WireConnection;40;2;41;0
+WireConnection;66;0;67;0
+WireConnection;122;0;121;1
+WireConnection;122;1;53;1
+WireConnection;122;2;105;0
 WireConnection;25;0;40;0
 WireConnection;25;1;24;0
 WireConnection;26;0;25;0
 WireConnection;26;1;27;0
-WireConnection;66;0;67;0
-WireConnection;28;0;26;0
-WireConnection;49;0;48;0
-WireConnection;49;1;50;0
-WireConnection;13;0;28;0
 WireConnection;73;0;58;0
 WireConnection;73;1;74;0
-WireConnection;53;0;54;0
-WireConnection;53;1;49;0
-WireConnection;57;0;53;1
+WireConnection;114;0;122;0
+WireConnection;57;0;114;0
 WireConnection;57;1;73;0
-WireConnection;62;0;57;0
-WireConnection;62;1;61;2
+WireConnection;28;0;26;0
+WireConnection;55;0;57;0
+WireConnection;13;0;28;0
 WireConnection;36;0;33;0
 WireConnection;36;1;34;0
 WireConnection;36;2;37;0
-WireConnection;55;0;62;0
+WireConnection;62;0;107;0
+WireConnection;62;1;106;0
+WireConnection;108;0;62;0
 WireConnection;39;0;36;0
-WireConnection;45;0;44;0
 WireConnection;75;0;47;0
 WireConnection;75;1;76;0
 WireConnection;44;0;43;0
 WireConnection;44;1;49;0
 WireConnection;44;5;75;0
+WireConnection;123;0;44;0
+WireConnection;123;1;120;0
+WireConnection;123;2;105;0
+WireConnection;120;0;43;0
+WireConnection;120;1;118;0
+WireConnection;120;5;75;0
+WireConnection;45;0;123;0
 WireConnection;1;0;14;0
 WireConnection;1;1;46;0
 WireConnection;1;3;51;0
 WireConnection;1;4;52;0
 WireConnection;1;8;56;0
 ASEEND*/
-//CHKSM=1D64E1443607505A8B620B7B045A6AD34069CA4D
+//CHKSM=B7C6A830D1F6EE6580050EFAE3147B9DCAA99208
