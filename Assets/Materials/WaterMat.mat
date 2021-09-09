@@ -112,7 +112,7 @@ Material:
     - _NormalMapColorVariationScale: 0.16
     - _NormalMapDeformStrength: 0.1
     - _NormalMapScale: 0.4
-    - _NormalMapScrollSpeed: -0.1
+    - _NormalMapScrollSpeed: -0.15
     - _NormalMapScrollSpeed1: 0.015
     - _NormalMapStrength: 0.7
     - _NormalMapStrengthVariationBias: 0.191
@@ -143,23 +143,23 @@ Material:
     - _TransShadow: 0.352
     - _TransStrength: 0
     - _TransmissionShadow: 0.5
-    - _TransparencyDepthDistance: 1.04
-    - _TransparencyDepthFalloff: 0.76
+    - _TransparencyDepthDistance: 1.7
+    - _TransparencyDepthFalloff: 0.33
     - _TransparencyDepthMin: 0.38
-    - _UnderwaterDim: 0.1
+    - _UnderwaterDim: 0.05
     - _WaterDepthMapFalloff: 0.74
     - _WaterDepthMapStrength: 1
-    - _WaveContrast: 2.78
+    - _WaveContrast: 2.18
     - _WaveDepthFalloff: 0.297
     - _WaveDepthMinValue: 0.04
     - _WaveHeight: -1.09
-    - _WaveMapScale: 16
-    - _WaveMaxOffset: 1
+    - _WaveMapScale: 25
+    - _WaveMaxOffset: 2
     - _WavePow: 1
-    - _WaveSpeed: 1
+    - _WaveSpeed: 2
     - _WaveSpherizeStrength: 0.0005
-    - _WaveStrength: 2.2
-    - _WaveWidthRatio: 2.7
+    - _WaveStrength: 2
+    - _WaveWidthRatio: 4
     - _Wavemapscale: 0.04
     - _WorkflowMode: 1
     - _ZWrite: 1
@@ -176,10 +176,10 @@ Material:
     - _TerrainPositionInUnits: {r: 0, g: 0, b: 0, a: 0}
     - _TerrainSizeInUnits: {r: 40, g: 40, b: 0, a: 0}
     - _Vector3: {r: 58.5, g: 19.85, b: 0, a: 0}
-    - _WaterColorDeep: {r: 0.14631541, g: 0.41361105, b: 0.509434, a: 1}
-    - _WaterColorDeepTop: {r: 0.02173569, g: 0.09660915, b: 0.13207549, a: 0}
-    - _WaterColorShallow: {r: 0.08187967, g: 0.40979072, b: 0.4245283, a: 1}
-    - _WaveBreakedBounds: {r: 0.72, g: 0.89, b: 0, a: 0}
+    - _WaterColorDeep: {r: 0.06460385, g: 0.34371403, b: 0.4433962, a: 1}
+    - _WaterColorDeepTop: {r: 0.18769035, g: 0.47415346, b: 0.6132076, a: 1}
+    - _WaterColorShallow: {r: 0.06581029, g: 0.49803764, b: 0.5188679, a: 1}
+    - _WaveBreakedBounds: {r: 0.27, g: 0.5, b: 0, a: 0}
     - _WaveSpherizeCenter: {r: 65.98, g: 21.43, b: 0, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &7465072212798676212
